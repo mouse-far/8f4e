@@ -24,9 +24,6 @@ export default function codeBlockDragger(store: StateManager<State>, events: Eve
 
 	function onMouseDown(event: InternalMouseEvent) {
 		const { x, y, altKey } = event;
-		if (!state.featureFlags.moduleDragging) {
-			return;
-		}
 
 		state.codeBlockRendering.draggedCodeBlock = findCodeBlockAtViewportCoordinates(state, x, y);
 		const draggedCodeBlock = state.codeBlockRendering.draggedCodeBlock;
@@ -39,6 +36,25 @@ export default function codeBlockDragger(store: StateManager<State>, events: Eve
 		}
 		store.set('codeBlockRendering.selectedCodeBlock', state.codeBlockRendering.draggedCodeBlock);
 		didDrag = false;
+
+		const relativeX = Math.abs(x - (draggedCodeBlock.x - state.viewport.x));
+		const relativeY = Math.abs(y - (draggedCodeBlock.y - state.viewport.y));
+
+		events.dispatch<CodeBlockClickEvent>('codeBlockClick', {
+			x,
+			y,
+			relativeX,
+			relativeY,
+			codeBlock: draggedCodeBlock,
+		});
+
+		// When module dragging is disabled, clicks still reach plugins but no drag state is prepared.
+		if (!state.featureFlags.moduleDragging) {
+			state.codeBlockRendering.draggedCodeBlock = undefined;
+			dragSet = [];
+			didDrag = false;
+			return;
+		}
 
 		// Compute drag set based on nonstick flag and modifier
 		// 1. If block is in a nonstick group and modifier is NOT held: single-block drag
@@ -66,17 +82,6 @@ export default function codeBlockDragger(store: StateManager<State>, events: Eve
 			// Single block drag (no group)
 			dragSet = [draggedCodeBlock];
 		}
-
-		const relativeX = Math.abs(x - (draggedCodeBlock.x - state.viewport.x));
-		const relativeY = Math.abs(y - (draggedCodeBlock.y - state.viewport.y));
-
-		events.dispatch<CodeBlockClickEvent>('codeBlockClick', {
-			x,
-			y,
-			relativeX,
-			relativeY,
-			codeBlock: draggedCodeBlock,
-		});
 
 		// Bring dragged module forward within its z-order partition.
 		// Normal blocks move to the end of the normal segment (before always-on-top blocks).
