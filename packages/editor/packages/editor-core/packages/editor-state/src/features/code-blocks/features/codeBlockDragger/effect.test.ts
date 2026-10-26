@@ -972,3 +972,158 @@ describe('codeBlockDragger', () => {
 		});
 	});
 });
+describe('switch clicks with moduleDragging disabled (#1219)', () => {
+	let state: State;
+	let store: ReturnType<typeof createStateManager<State>>;
+	let events: EventDispatcher;
+	let mousedownHandlers: Array<(event: InternalMouseEvent) => void>;
+	let mousemoveHandlers: Array<(event: InternalMouseEvent) => void>;
+	let mouseupHandlers: Array<() => void>;
+
+	beforeEach(() => {
+		// Initialize state
+		state = createMockState({
+			featureFlags: {
+				moduleDragging: true,
+				editing: true,
+			},
+			codeBlockRendering: {
+				codeBlocks: [],
+				viewportAnchoredCodeBlocks: [],
+				draggedCodeBlock: undefined,
+				selectedCodeBlock: undefined,
+				nextCodeBlockCreationIndex: 0,
+				outputsByWordAddress: new Map(),
+			},
+			contextMenu: {
+				highlightedItem: 0,
+				itemWidth: 200,
+				items: [],
+				open: false,
+				x: 0,
+				y: 0,
+				menuStack: [],
+			},
+			viewport: {
+				x: 0,
+				y: 0,
+				vGrid: 10,
+				hGrid: 20,
+				width: 800,
+				height: 600,
+				gridCoordinates: { x: 0, y: 0 },
+			},
+		});
+
+		store = createStateManager(state);
+
+		mousedownHandlers = [];
+		mousemoveHandlers = [];
+		mouseupHandlers = [];
+
+		events = {
+			on: vi.fn((eventName: string, callback: (event: InternalMouseEvent | void) => void) => {
+				if (eventName === 'mousedown') mousedownHandlers.push(callback as (event: InternalMouseEvent) => void);
+				if (eventName === 'mousemove') mousemoveHandlers.push(callback as (event: InternalMouseEvent) => void);
+				if (eventName === 'mouseup') mouseupHandlers.push(callback as () => void);
+			}),
+			off: vi.fn(),
+			dispatch: vi.fn(),
+		};
+	});
+
+	it('dispatches codeBlockClick on mousedown while moduleDragging is disabled', () => {
+		state.featureFlags.moduleDragging = false;
+
+		const block1 = createCodeBlockGraphicData({
+			code: ['module test1', 'moduleEnd'],
+			gridX: 5,
+			gridY: 5,
+			x: 50,
+			y: 100,
+			creationIndex: 0,
+			blockType: 'module',
+		});
+
+		state.codeBlockRendering.codeBlocks = [block1];
+
+		codeBlockDragger(store, events);
+
+		// Mousedown on the block
+		mousedownHandlers[0]({
+			x: 50,
+			y: 100,
+			movementX: 0,
+			movementY: 0,
+			buttons: 1,
+			stopPropagation: false,
+			canvasWidth: 800,
+			canvasHeight: 600,
+			altKey: false,
+		});
+
+		// The click still reaches plugins even though dragging is disabled.
+		expect(events.dispatch).toHaveBeenCalledWith('codeBlockClick', expect.objectContaining({ codeBlock: block1 }));
+		// The block is still selected, but no drag state is prepared.
+		expect(state.codeBlockRendering.selectedCodeBlock).toBe(block1);
+		expect(state.codeBlockRendering.draggedCodeBlock).toBeUndefined();
+
+		// Mousemove must not reposition the block while dragging is disabled.
+		mousemoveHandlers[0]({
+			x: 60,
+			y: 110,
+			movementX: 10,
+			movementY: 10,
+			buttons: 1,
+			stopPropagation: false,
+			canvasWidth: 800,
+			canvasHeight: 600,
+			altKey: false,
+		});
+		mouseupHandlers[0]();
+
+		expect(block1.x).toBe(50);
+		expect(block1.y).toBe(100);
+	});
+
+	it('dispatches codeBlockClick for a switch module while moduleDragging is disabled', () => {
+		state.featureFlags.moduleDragging = false;
+
+		const switchBlock = createCodeBlockGraphicData({
+			code: ['module controls', 'int gate 0', '; @switch &gate 0 1', 'moduleEnd'],
+			gridX: 5,
+			gridY: 5,
+			x: 50,
+			y: 100,
+			creationIndex: 0,
+			blockType: 'module',
+		});
+
+		state.codeBlockRendering.codeBlocks = [switchBlock];
+
+		codeBlockDragger(store, events);
+
+		// Mousedown on the switch block
+		mousedownHandlers[0]({
+			x: 50,
+			y: 100,
+			movementX: 0,
+			movementY: 0,
+			buttons: 1,
+			stopPropagation: false,
+			canvasWidth: 800,
+			canvasHeight: 600,
+			altKey: false,
+		});
+
+		// The switch plugin receives the click so it can toggle its memory value.
+		expect(events.dispatch).toHaveBeenCalledWith(
+			'codeBlockClick',
+			expect.objectContaining({ x: 50, y: 100, codeBlock: switchBlock }),
+		);
+		// No dragging is prepared and the block does not move.
+		expect(state.codeBlockRendering.draggedCodeBlock).toBeUndefined();
+		expect(switchBlock.x).toBe(50);
+		expect(switchBlock.y).toBe(100);
+	});
+});
